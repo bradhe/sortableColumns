@@ -1,9 +1,22 @@
 (function($) {
   var startingIndex = -1;
+  var columnIndex = null;
   var currentlyOver = null;
   var positions = [];
   var table = null;
   var droppedFunction = null;
+  var currentlyHighlighted = null;
+  var lastMovement = null;
+  
+  function fastPushClass(cls, element) {
+    element.className = element.className + ' ' + cls;
+    return element;
+  }
+  
+  function fastPopClass(cls, element) {
+    element.className = element.className.substring(0, element.className.length - cls.length);
+    return element; 
+  }
 
   function buildPositionIndex(headers) {
     var positions = {};
@@ -16,12 +29,6 @@
       
       positions[i] = { 
         'th': headers[i], 
-        'position': { 
-          top: y, 
-          left: x, 
-          bottom: y + header.outerHeight(), 
-          right: x + header.outerWidth() 
-        },
         'center': {
           x: x + (header.outerWidth() / 2),
           y: y + (header.outerHeight() / 2)
@@ -32,6 +39,31 @@
     return positions;
   }
   
+  function buildColumnsIndex(headers, grid) {
+    var rows = grid.find('tr');
+    var index = {};
+    
+    for(var i = 0; i < headers.length; i++) {
+      $(headers[i]).data('columnIndex', i);
+    }
+    
+    // Now fille the index
+    for(var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      
+      for(var j = 0; j < row.children.length; j++) {
+        if(!index[j]) {
+          index[j] = [];
+        }
+      
+        var child = row.children[j];
+        index[j].push(child);
+      }
+    }
+    
+    return index;
+  }
+  
   function distance(p1, p2) {
     var a = Math.abs(p1.x - p2.x);
     var b = Math.abs(p1.y - p2.y);
@@ -39,11 +71,16 @@
   }
   
   function highlightRowPosition(cls, oppositeCls, index) {
-    var rows = table.find('tr');
-    table.find('th.'+oppositeCls).removeClass(oppositeCls);
-    table.find('td.'+oppositeCls).removeClass(oppositeCls);
-    table.find('th:nth-child('+(index+1)+')').addClass(cls);
-    table.find('td:nth-child('+(index+1)+')').addClass(cls);
+    if(currentlyHighlighted) {
+      for(var i = 0; i < currentlyHighlighted.length; i++) {
+        fastPopClass(oppositeCls, currentlyHighlighted[i]);
+      }
+    }
+    
+    currentlyHighlighted = columnIndex[index];
+    for(var i = 0; i < currentlyHighlighted.length; i++) {
+      fastPopClass(cls, currentlyHighlighted[i]);
+    }
   } 
   
   var settings = {
@@ -63,7 +100,8 @@
 
       // We need to build a header position index
       positions = buildPositionIndex(headers);
-      
+      columnIndex = buildColumnsIndex(headers, table);
+     
       if(options) {
         settings = $.extend(settings, options);
       }
@@ -72,30 +110,34 @@
         // Starts at...
         startingIndex = $(this).index();
         
+        //var th = $('<th/>').text($(this).text()).addClass(this.className);
         var th = $(this).clone();
         var span = $('<span/>').append($('<table/>').append($('<tr/>').append(th)));
-        span.css('position', 'absolute');
-        span.css('left', e.pageX - ($(this).width() / 2));
-        span.css('top', e.pageY - ($(this).height() / 2));
-        $(span).data('parent', this);
+        span[0].style.position = 'absolute';
+        span[0].style.left = e.pageX - ($(this).width() / 2);
+        span[0].style.top = e.pageY - ($(this).height() / 2);
+        var parent = this;
+        
+        var centerOffset = { x: $(span).width() / 2, y: $(span).height() / 2 };
         
         $(this).parents('table').before(span);
 
         $('body').bind('mousemove.sortableColumns', function(e) {
-          if(settings.showPosition) {
-            headers.removeClass(settings.hoverClass);
-          }
-          
           span[0].style.left = e.clientX - (span.width() / 2);
           span[0].style.top = e.clientY - (span.height() / 2);
           
-          var parent = $(span).data('parent');
-          var position = $(span).position();
-          var center = { x: position.left + (span.width() / 2), y: position.top + (span.height() / 2) };
+          // Don't do anything unless it's moved so far.
+          if(lastMovement && distance({ x: e.clientX, y: e.clientY }, lastMovement) < 30) {
+            return false;
+          }
+          else {
+            lastMovement = { x: e.clientX, y: e.clientY };
+          }
           
+          var center = { x: e.pageX, y: e.pageY };
           var minDistance = null;
           var th = null;
-          
+
           for(var i in positions) {
             var pos = positions[i];
             var d = distance(center, pos.center);
@@ -106,19 +148,23 @@
             }
           }
 
-          if(th && $(parent).index() != $(th).index()) {
+          if(th && currentlyOver != th) {
             th = $(th);
             
-            if(settings.showPosition && !$(th).hasClass(settings.hoverClass)) {
-              th.addClass(settings.hoverClass);
-              
-              // Show 'left' or 'right' too
-              var center = th.position().left + (th.width() / 2);
+            if(currentlyOver) {
+              fastPopClass(settings.hoverClass, currentlyOver[0]);
+            }
+            
+            if(settings.showPosition && !th.hasClass(settings.hoverClass)) {
+              fastPushClass(settings.hoverClass, th[0]);
               
               if(settings.showPositionInRows) {
+                // Show 'left' or 'right' too
+                var center = th.position().left + (th.width() / 2);
+              
                 var cls = null;
                 var oppositeCls = null;
-                var index = th.index();
+                var index = th.data('columnIndex');
                 
                 if(center >= e.pageX) {
                   cls = settings.leftClass;
@@ -128,40 +174,17 @@
                   cls = settings.rightClass;
                   oppositeCls = settings.leftClass;
                 }
-
+                
                 highlightRowPosition(cls, oppositeCls, index);
               }
-              else {
-                if(center >= e.pageX) {
-                  th.addClass(settings.leftClass);
-                  th.removeClass(settings.rightClass);
-                }
-                else {
-                  th.addClass(settings.rightClass);
-                  th.removeClass(settings.leftClass);
-                }              
-              }
             }
             
-            currentlyOver = $(th);
+            currentlyOver = th;
           }
           else {
-            if(settings.showPositionInRows) {
-              table.find('th').removeClass(settings.rightClass);
-              table.find('td').removeClass(settings.rightClass);
-              table.find('th').removeClass(settings.leftClass);
-              table.find('td').removeClass(settings.leftClass);
-              /*table.find('th, td').removeClass(settings.leftClass);*/
-            }
-            else {
-              headers.removeClass(settings.rightClass);
-              headers.removeClass(settings.leftClass);
-            }
-            
-            headers.removeClass(settings.hoverClass);
             currentlyOver = null;
-            
           }
+     
           
           // Prevent default behavior?
           return false;
@@ -247,16 +270,9 @@
           currentlyOver = null;
           span.remove();
   
-          if(settings.showPositionInRows) {
-            table.find('th.'+settings.rightClass).removeClass(settings.rightClass);
-            table.find('td.'+settings.rightClass).removeClass(settings.rightClass);
-            
-            table.find('th.'+settings.leftClass).removeClass(settings.leftClass);
-            table.find('td.'+settings.leftClass).removeClass(settings.leftClass);
-          }
-          else {
-            headers.removeClass(settings.rightClass);
-            headers.removeClass(settings.leftClass);
+          if(settings.showPositionInRows && currentlyHighlighted) {
+            $(currentlyHighlighted).removeClass(settings.rightClass);
+            $(currentlyHighlighted).removeClass(settings.leftClass);
           }
           
           headers.removeClass(settings.hoverClass);
