@@ -10,6 +10,8 @@
   var span = null;
   var headers = null;
   
+  // TODO: Finish this implementation. $.addClass and $.removeClass are both
+  // very very slow.
   function fastPushClass(cls, element) {
     $(element).addClass(cls);
 //    element.className = element.className + ' ' + cls;
@@ -240,9 +242,13 @@
         
     $('body').unbind('mousemove.sortableColumns');
 
-    //return false;
+    // NOTE: Do not return false here. We need to allow this event to
+    // continue bubbling and we don't want to interfecre with any default
+    // behavior.
   }
 
+  // Creates an index of all of the positions of the TH elements passed in.
+  // This is because $.index is really slow.
   function buildPositionIndex(headers) {
     var positions = {};
 
@@ -318,6 +324,7 @@
     }
   } 
 
+  // Some helpers
   function internalInit(ths, table) {
     // We need to build a header position index
     positions = buildPositionIndex(headers);
@@ -327,6 +334,7 @@
   function reinit(ths, table) {
     internalInit(ths, table);
   }
+  // end some helpers
   
   // These are the default settings. They will be merged
   // with the customizable settings later.
